@@ -1,0 +1,11 @@
+[
+  {
+    "timestamp": "2025-07-08T03:00:19.373313",
+    "event_type": "ping",
+    "action": null,
+    "workflow_run": null,
+    "check_run": null,
+    "repository": "igorpavlov-mgr/mcp-pr-agent-actions-demo",
+    "sender": "igorpavlov-mgr"
+  }
+]
