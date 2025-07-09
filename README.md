@@ -1,6 +1,5 @@
-<<<<<<< HEAD
 # mcp-pr-agent-actions-demo
-Test repository for GitHub Actions integration and webhook testing with Claude MCP PR Agent (Unit 3 / Module 2)
+Test repository for GitHub Actions integration and webhook testing with Claude MCP PR Agent (Hugging Face MCP Course practice)
 =======
 # PR Agent MCP Server
 
@@ -512,4 +511,3 @@ SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK
 The server automatically loads environment variables using `python-dotenv` for secure configuration management.
 
 This MCP server provides a complete solution for intelligent PR analysis and event-driven GitHub Actions automation with comprehensive incident response capabilities and real-time Slack notifications, leveraging Claude's AI capabilities for enhanced development workflows and seamless team coordination.
->>>>>>> 0da359b (Restructure: move MCP server files to root of project)
