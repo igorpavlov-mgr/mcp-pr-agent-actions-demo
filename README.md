@@ -1,6 +1,3 @@
-# mcp-pr-agent-actions-demo
-Test repository for GitHub Actions integration and webhook testing with Claude MCP PR Agent (Hugging Face MCP Course practice)
-=======
 # PR Agent MCP Server
 
 A comprehensive MCP server that combines PR template analysis with GitHub Actions webhook integration for event-driven automation, CI/CD monitoring, intelligent incident response, and Slack notifications for complete team communication workflows.
