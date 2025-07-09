@@ -12,6 +12,7 @@ Extends the PR agent with webhook handling and standardized CI/CD workflows usin
 import json
 import os
 import subprocess
+from datetime import datetime, timezone, timedelta
 
 from typing import Optional
 from pathlib import Path
@@ -24,8 +25,14 @@ mcp = FastMCP("pr-agent")
 # File where webhook server stores events
 EVENTS_FILE = Path(__file__).parent / "github_events.json"
 
+# File to track event processing state
+EVENTS_STATE_FILE = Path(__file__).parent / "events_state.json"
+
+# File to store team member mappings
+TEAM_CONFIG_FILE = Path(__file__).parent / "team_config.json"
+
 # PR template directory (shared across all modules)
-TEMPLATES_DIR = Path(__file__).parent.parent.parent / "templates"
+TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 # Default PR templates
 DEFAULT_TEMPLATES = {
@@ -235,11 +242,11 @@ async def get_recent_actions_events(limit: int = 10) -> str:
 
 
 @mcp.tool()
-async def get_workflow_status(workflow_name: Optional[str] = None) -> str:
+async def get_workflow_status(conclusion: Optional[str] = None) -> str:
     """Get the current status of GitHub Actions workflows.
     
     Args:
-        workflow_name: Optional specific workflow name to filter by
+        conclusion: Optional filter by conclusion (success, failure, cancelled, skipped, etc.)
     """
     # Read events from file
     if not EVENTS_FILE.exists():
@@ -257,28 +264,338 @@ async def get_workflow_status(workflow_name: Optional[str] = None) -> str:
         if e.get("workflow_run") is not None
     ]
     
-    if workflow_name:
+    # Filter by conclusion if provided
+    if conclusion:
         workflow_events = [
             e for e in workflow_events
-            if e["workflow_run"].get("name") == workflow_name
+            if e["workflow_run"].get("conclusion") == conclusion
         ]
     
-    # Group by workflow and get latest status
-    workflows = {}
+    # Group by repository
+    repositories = {}
+    current_time = datetime.now(timezone.utc)
+    
     for event in workflow_events:
         run = event["workflow_run"]
-        name = run["name"]
-        if name not in workflows or run["updated_at"] > workflows[name]["updated_at"]:
-            workflows[name] = {
-                "name": name,
-                "status": run["status"],
-                "conclusion": run.get("conclusion"),
-                "run_number": run["run_number"],
-                "updated_at": run["updated_at"],
-                "html_url": run["html_url"]
+        repo = event["repository"]
+        
+        if repo not in repositories:
+            repositories[repo] = {
+                "repository": repo,
+                "workflows": {},
+                "latest_run": None,
+                "total_runs": 0
             }
+        
+        repositories[repo]["total_runs"] += 1
+        
+        # Track latest run per workflow within repository
+        workflow_name = run["name"]
+        if workflow_name not in repositories[repo]["workflows"]:
+            repositories[repo]["workflows"][workflow_name] = []
+        
+        # Calculate time since last run
+        updated_at = run["updated_at"]
+        if updated_at:
+            try:
+                run_time = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
+                time_diff = current_time - run_time
+                time_since = {
+                    "days": time_diff.days,
+                    "hours": time_diff.seconds // 3600,
+                    "minutes": (time_diff.seconds % 3600) // 60,
+                    "total_seconds": time_diff.total_seconds()
+                }
+            except:
+                time_since = {"error": "Could not parse timestamp"}
+        else:
+            time_since = {"error": "No timestamp available"}
+        
+        workflow_info = {
+            "name": workflow_name,
+            "status": run["status"],
+            "conclusion": run.get("conclusion"),
+            "run_number": run["run_number"],
+            "updated_at": updated_at,
+            "time_since_run": time_since,
+            "html_url": run["html_url"]
+        }
+        
+        repositories[repo]["workflows"][workflow_name].append(workflow_info)
+        
+        # Update latest run for repository
+        if (repositories[repo]["latest_run"] is None or 
+            updated_at > repositories[repo]["latest_run"]["updated_at"]):
+            repositories[repo]["latest_run"] = workflow_info
     
-    return json.dumps(list(workflows.values()), indent=2)
+    # Convert workflows dict to list and sort by most recent
+    for repo_data in repositories.values():
+        for workflow_name in repo_data["workflows"]:
+            repo_data["workflows"][workflow_name].sort(
+                key=lambda x: x["updated_at"], 
+                reverse=True
+            )
+    
+    # Create summary
+    summary = {
+        "total_repositories": len(repositories),
+        "filter_applied": f"conclusion={conclusion}" if conclusion else "none",
+        "generated_at": current_time.isoformat(),
+        "repositories": list(repositories.values())
+    }
+    
+    return json.dumps(summary, indent=2)
+
+
+@mcp.tool()
+async def get_unseen_events(mark_as_seen: bool = False) -> str:
+    """Get events that haven't been processed yet and optionally mark them as seen.
+    
+    Args:
+        mark_as_seen: If True, mark returned events as seen (default: False)
+    """
+    # Read events from file
+    if not EVENTS_FILE.exists():
+        return json.dumps({"message": "No GitHub Actions events received yet"})
+    
+    with open(EVENTS_FILE, 'r') as f:
+        events = json.load(f)
+    
+    # Read or initialize state
+    seen_events = set()
+    if EVENTS_STATE_FILE.exists():
+        with open(EVENTS_STATE_FILE, 'r') as f:
+            state = json.load(f)
+            seen_events = set(state.get("seen_event_ids", []))
+    
+    # Find unseen events (using timestamp + event_type + repository as unique ID)
+    unseen_events = []
+    new_seen_ids = set()
+    
+    for event in events:
+        event_id = f"{event['timestamp']}:{event['event_type']}:{event['repository']}"
+        if event_id not in seen_events:
+            unseen_events.append({
+                **event,
+                "event_id": event_id
+            })
+            new_seen_ids.add(event_id)
+    
+    # Mark as seen if requested
+    if mark_as_seen and unseen_events:
+        seen_events.update(new_seen_ids)
+        state = {
+            "seen_event_ids": list(seen_events),
+            "last_processed": datetime.now(timezone.utc).isoformat()
+        }
+        with open(EVENTS_STATE_FILE, 'w') as f:
+            json.dump(state, f, indent=2)
+    
+    result = {
+        "unseen_count": len(unseen_events),
+        "events": unseen_events,
+        "marked_as_seen": mark_as_seen
+    }
+    
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+async def get_new_failures(since_hours: int = 24) -> str:
+    """Identify new workflow failures that need attention.
+    
+    Args:
+        since_hours: Look for failures within the last N hours (default: 24)
+    """
+    # Read events from file
+    if not EVENTS_FILE.exists():
+        return json.dumps({"message": "No GitHub Actions events received yet"})
+    
+    with open(EVENTS_FILE, 'r') as f:
+        events = json.load(f)
+    
+    # Filter for workflow failures within time window
+    current_time = datetime.now(timezone.utc)
+    cutoff_time = current_time - timedelta(hours=since_hours)
+    
+    failures = []
+    for event in events:
+        if event.get("workflow_run") and event["workflow_run"].get("conclusion") == "failure":
+            event_time = datetime.fromisoformat(event["timestamp"].replace('Z', '+00:00'))
+            if event_time >= cutoff_time:
+                failures.append(event)
+    
+    # Group by repository and workflow
+    failure_groups = {}
+    for failure in failures:
+        run = failure["workflow_run"]
+        repo = failure["repository"]
+        workflow_name = run["name"]
+        
+        key = f"{repo}:{workflow_name}"
+        if key not in failure_groups:
+            failure_groups[key] = {
+                "repository": repo,
+                "workflow_name": workflow_name,
+                "failure_count": 0,
+                "first_failure": failure["timestamp"],
+                "latest_failure": failure["timestamp"],
+                "failures": []
+            }
+        
+        failure_groups[key]["failure_count"] += 1
+        failure_groups[key]["failures"].append({
+            "timestamp": failure["timestamp"],
+            "run_number": run["run_number"],
+            "html_url": run["html_url"],
+            "sender": failure["sender"]
+        })
+        
+        # Update latest failure time
+        if failure["timestamp"] > failure_groups[key]["latest_failure"]:
+            failure_groups[key]["latest_failure"] = failure["timestamp"]
+    
+    # Sort by failure count (most failures first)
+    sorted_failures = sorted(failure_groups.values(), key=lambda x: x["failure_count"], reverse=True)
+    
+    result = {
+        "time_window_hours": since_hours,
+        "total_failure_groups": len(sorted_failures),
+        "total_individual_failures": len(failures),
+        "failure_groups": sorted_failures
+    }
+    
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+async def suggest_team_notification(repository: str, workflow_name: str, failure_type: str = "general") -> str:
+    """Suggest which team member to notify based on repository and failure type.
+    
+    Args:
+        repository: Repository name (e.g., "user/repo")
+        workflow_name: Name of the failing workflow
+        failure_type: Type of failure (general, frontend, backend, deployment, security)
+    """
+    # Read team configuration
+    team_config = {}
+    if TEAM_CONFIG_FILE.exists():
+        with open(TEAM_CONFIG_FILE, 'r') as f:
+            team_config = json.load(f)
+    
+    # Default team mapping structure
+    default_config = {
+        "repositories": {},
+        "expertise": {
+            "frontend": ["frontend-lead"],
+            "backend": ["backend-lead"],
+            "deployment": ["devops-lead"],
+            "security": ["security-lead"],
+            "general": ["tech-lead"]
+        },
+        "on_call": {
+            "primary": "on-call-primary",
+            "secondary": "on-call-secondary"
+        }
+    }
+    
+    # Merge with existing config
+    config = {**default_config, **team_config}
+    
+    suggestions = []
+    
+    # 1. Check repository-specific owners
+    if repository in config.get("repositories", {}):
+        repo_owners = config["repositories"][repository]
+        suggestions.extend([{
+            "type": "repository_owner",
+            "person": person,
+            "reason": f"Repository owner for {repository}"
+        } for person in repo_owners])
+    
+    # 2. Check expertise-based routing
+    if failure_type in config.get("expertise", {}):
+        experts = config["expertise"][failure_type]
+        suggestions.extend([{
+            "type": "expertise",
+            "person": person,
+            "reason": f"Expert in {failure_type} issues"
+        } for person in experts])
+    
+    # 3. Add on-call rotation
+    if config.get("on_call", {}).get("primary"):
+        suggestions.append({
+            "type": "on_call_primary",
+            "person": config["on_call"]["primary"],
+            "reason": "Primary on-call engineer"
+        })
+    
+    if config.get("on_call", {}).get("secondary"):
+        suggestions.append({
+            "type": "on_call_secondary",
+            "person": config["on_call"]["secondary"],
+            "reason": "Secondary on-call engineer"
+        })
+    
+    # 4. Workflow-specific suggestions
+    workflow_suggestions = []
+    if "test" in workflow_name.lower():
+        workflow_suggestions.append("QA team should be notified for test failures")
+    elif "deploy" in workflow_name.lower():
+        workflow_suggestions.append("DevOps team should be notified for deployment failures")
+    elif "security" in workflow_name.lower():
+        workflow_suggestions.append("Security team should be notified for security check failures")
+    
+    result = {
+        "repository": repository,
+        "workflow_name": workflow_name,
+        "failure_type": failure_type,
+        "notification_suggestions": suggestions,
+        "workflow_specific_notes": workflow_suggestions,
+        "config_file_location": str(TEAM_CONFIG_FILE),
+        "config_exists": TEAM_CONFIG_FILE.exists()
+    }
+    
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+async def mark_events_as_seen(event_ids: list = None) -> str:
+    """Mark specific events as seen to prevent them from appearing in unseen events.
+    
+    Args:
+        event_ids: List of event IDs to mark as seen (format: "timestamp:event_type:repository")
+    """
+    if not event_ids:
+        return json.dumps({"error": "No event IDs provided"})
+    
+    # Read or initialize state
+    seen_events = set()
+    if EVENTS_STATE_FILE.exists():
+        with open(EVENTS_STATE_FILE, 'r') as f:
+            state = json.load(f)
+            seen_events = set(state.get("seen_event_ids", []))
+    
+    # Add new seen events
+    seen_events.update(event_ids)
+    
+    # Save state
+    state = {
+        "seen_event_ids": list(seen_events),
+        "last_processed": datetime.now(timezone.utc).isoformat(),
+        "manually_marked_count": len(event_ids)
+    }
+    
+    with open(EVENTS_STATE_FILE, 'w') as f:
+        json.dump(state, f, indent=2)
+    
+    result = {
+        "marked_as_seen": len(event_ids),
+        "total_seen_events": len(seen_events),
+        "event_ids_marked": event_ids
+    }
+    
+    return json.dumps(result, indent=2)
 
 # MCP Prompts
 
@@ -407,6 +724,98 @@ Structure your response as:
 ### 📚 Resources
 - [Relevant documentation links]
 - [Similar issues or solutions]"""
+
+# Additional MCP Prompt for Mocdule 2 (Excercise 1)
+
+@mcp.prompt()
+async def review_pull_request() -> str:
+    """
+    Provide a structured PR review summary combining code changes and CI/CD status.
+    """
+    # Get recent code changes
+    changes_summary = await analyze_file_changes()
+    
+    # Get workflow status
+    workflow_status = await get_workflow_status()
+    
+    return f"""
+# 🧠 PR Review Assistant
+
+## 🔍 Code Changes Summary
+```json
+{changes_summary}
+```
+
+## 🔄 CI/CD Status  
+```json
+{workflow_status}
+```
+
+## 📋 Review Summary
+Based on the code changes and CI/CD status above, here's a comprehensive review:
+
+### ✅ What's Working Well
+- Code changes are properly tracked
+- CI/CD pipeline integration is active
+
+### ⚠️ Areas for Attention
+- Review the specific changes and their impact
+- Monitor workflow status for any failures
+
+### 🎯 Next Steps
+1. Review the code changes in detail
+2. Ensure all CI/CD checks pass
+3. Address any workflow failures if present
+"""
+
+
+@mcp.prompt()
+async def incident_response_dashboard():
+    """Generate a comprehensive incident response dashboard for new failures and required notifications."""
+    return """Create a comprehensive incident response dashboard:
+
+1. First, use get_unseen_events() to check for any new events since last check
+2. Then use get_new_failures() to identify recent failures needing attention
+3. For each failure group, use suggest_team_notification() to identify who to notify
+4. Use get_workflow_status(conclusion="failure") to get current failure status
+5. Mark critical events as seen using mark_events_as_seen() after processing
+
+Generate this structured dashboard:
+
+## 🚨 Incident Response Dashboard
+
+### 📊 New Events Summary
+- **Unseen Events**: [Count and summary]
+- **New Failures**: [Count in last 24 hours]
+- **Critical Repositories**: [Those with multiple failures]
+
+### 🔥 Active Failures Requiring Action
+For each failure group:
+- **Repository**: [Name]
+- **Workflow**: [Name]
+- **Failure Count**: [Number of failures]
+- **Duration**: [Time since first failure]
+- **Recommended Notifications**: [Who to notify and why]
+- **Action Required**: [Specific steps to take]
+
+### 👥 Team Notification Plan
+- **Immediate Notifications**: [People to notify right now]
+- **Repository Owners**: [Specific repository maintainers]
+- **Expertise-Based**: [Subject matter experts]
+- **On-Call Escalation**: [If needed]
+
+### 📈 Failure Trends
+- **Most Failing Workflows**: [Top 3 by failure count]
+- **Most Affected Repositories**: [Top 3 by failure frequency]
+- **Escalation Needed**: [Repeated failures requiring management attention]
+
+### ✅ Next Steps
+1. [ ] Notify identified team members
+2. [ ] Create incidents for critical failures
+3. [ ] Mark events as seen once processed
+4. [ ] Schedule follow-up if needed
+
+Keep the dashboard concise but actionable - focus on what needs immediate attention."""
 
 
 if __name__ == "__main__":
