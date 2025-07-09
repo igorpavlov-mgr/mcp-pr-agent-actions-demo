@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a comprehensive FastMCP server implementation that combines PR (Pull Request) template analysis with GitHub Actions webhook integration for event-driven automation, CI/CD monitoring, and intelligent incident response. The server provides tools for direct function calls, prompts for standardized workflows, and advanced incident management capabilities.
+This is a comprehensive FastMCP server implementation that combines PR (Pull Request) template analysis with GitHub Actions webhook integration for event-driven automation, CI/CD monitoring, intelligent incident response, and Slack notifications for complete team communication workflows. The server provides tools for direct function calls, prompts for standardized workflows, advanced incident management capabilities, and real-time team notifications.
 
 ## Development Commands
 
 ### Setup and Dependencies
 ```bash
-# Install all dependencies (includes aiohttp for webhook support)
+# Install all dependencies (includes aiohttp for webhook support, requests for Slack, python-dotenv for environment management)
 uv sync
 
 # Install with development dependencies (includes testing)
@@ -42,9 +42,9 @@ uv run python validate_starter.py
 
 ### Core Components
 
-**FastMCP Server Instance**: The main server is instantiated as `mcp = FastMCP("pr-agent")` in server.py:22
+**FastMCP Server Instance**: The main server is instantiated as `mcp = FastMCP("pr-agent")` in server.py:33
 
-**Nine Main Tools**:
+**Ten Main Tools**:
 1. `analyze_file_changes()` - Analyzes git repository changes using git commands
 2. `get_pr_templates()` - Retrieves available PR templates from templates directory
 3. `suggest_template()` - Suggests appropriate template based on change analysis
@@ -54,19 +54,22 @@ uv run python validate_starter.py
 7. `get_new_failures()` - Identify recent workflow failures that need attention
 8. `suggest_team_notification()` - Get team member suggestions for failures
 9. `mark_events_as_seen()` - Manually mark events as processed
+10. `send_slack_notification()` - Send formatted notifications to team Slack channel
 
-**Six MCP Prompts**:
+**Eight MCP Prompts**:
 1. `analyze_ci_results()` - Analyze CI/CD results and provide insights
 2. `create_deployment_summary()` - Generate deployment summary for team communication
 3. `generate_pr_status_report()` - Comprehensive PR status combining code and CI/CD
 4. `troubleshoot_workflow_failure()` - Systematic workflow troubleshooting guide
 5. `review_pull_request()` - Structured PR review combining all data sources
 6. `incident_response_dashboard()` - Comprehensive incident response automation
+7. `format_ci_failure_alert()` - Create Slack alerts for CI/CD failures with rich formatting
+8. `format_ci_success_summary()` - Create Slack messages for successful deployments
 
 **Template System**: 
 - Templates stored in `templates/` directory
 - Default templates: `bug.md`, `feature.md`, `refactor.md`, `security.md`
-- Template mapping defined in `TYPE_MAPPING` dictionary (server.py:42-50)
+- Template mapping defined in `TYPE_MAPPING` dictionary (server.py:56-65)
 
 **Webhook Integration**:
 - GitHub Actions events stored in `github_events.json`
@@ -78,6 +81,12 @@ uv run python validate_starter.py
 - Team configuration in `team_config.json`
 - Persistent tracking of processed events
 - Intelligent team notification routing
+
+**Slack Integration**:
+- Real-time notifications via webhook URL stored in `.env`
+- Secure environment variable management with `python-dotenv`
+- Rich formatting support for Slack markdown
+- Timeout protection and comprehensive error handling
 
 ### Key Implementation Details
 
@@ -149,6 +158,11 @@ claude mcp list
 - `suggest_team_notification()` - For team member routing and notification
 - `mark_events_as_seen()` - For event state management
 
+### Slack Integration Tools
+- `send_slack_notification()` - For sending formatted messages to team Slack channel
+- `format_ci_failure_alert()` - For creating properly formatted failure alerts
+- `format_ci_success_summary()` - For creating deployment success celebrations
+
 ### Prompt Usage
 - Use prompts for standardized workflows and team communication
 - Prompts automatically call multiple tools and provide structured output
@@ -173,6 +187,12 @@ claude mcp list
 2. Configure on-call rotations and notification preferences
 3. Test with `suggest_team_notification()` to verify routing
 
+### Slack Integration Workflow
+1. Create `.env` file with `SLACK_WEBHOOK_URL` configuration
+2. Use `format_ci_failure_alert()` or `format_ci_success_summary()` prompts for proper formatting
+3. Send formatted messages via `send_slack_notification()` tool
+4. Monitor delivery status and handle any webhook failures
+
 ## Testing Strategy
 
 The test suite (`test_server.py`) validates:
@@ -184,6 +204,8 @@ The test suite (`test_server.py`) validates:
 - Webhook event processing and state management
 - Datetime calculations for workflow analysis
 - Event state tracking and team notification logic
+- Slack webhook integration and message formatting
+- Environment variable loading and secure configuration
 
 ## File Structure
 
@@ -191,6 +213,7 @@ The test suite (`test_server.py`) validates:
 starter/
 ├── server.py              # Main MCP server implementation
 ├── pyproject.toml         # Project dependencies and metadata
+├── .env                   # Environment variables (Slack webhook URL)
 ├── github_events.json     # GitHub Actions webhook events storage
 ├── events_state.json      # Event processing state tracking
 ├── team_config.json       # Team member and expertise mapping
@@ -243,6 +266,8 @@ starter/
 ### Dependencies
 - `mcp[cli]>=1.0.0` - FastMCP framework
 - `aiohttp>=3.10.0,<4.0.0` - HTTP client for webhook handling
+- `requests>=2.31.0` - HTTP client for Slack webhook notifications
+- `python-dotenv>=1.0.0` - Environment variable management for secure configuration
 - `datetime`, `timezone`, `timedelta` - For time calculations and event tracking
 - `subprocess` - For git command execution
 - `json` - For structured data handling
@@ -259,6 +284,13 @@ starter/
 2. Update relevant tools (`get_workflow_status()`, `get_new_failures()`) for new event types
 3. Consider adding new prompts for specific automation scenarios
 4. Update event state tracking if needed
+
+### Enhancing Slack Integration
+1. Add new Slack formatting prompts for specific notification types
+2. Extend `send_slack_notification()` with additional features (e.g., message threading, channel selection)
+3. Add retry logic for failed webhook deliveries
+4. Implement message queuing for high-volume notifications
+5. Add support for Slack interactive components (buttons, modals)
 
 ### Enhancing Incident Response
 1. Add new failure detection patterns in `get_new_failures()`
@@ -292,6 +324,12 @@ starter/
 - Server includes debug information in responses
 - Check working directory resolution logic
 
+#### Slack Integration
+- Test `send_slack_notification()` with different message formats
+- Verify `.env` file loading and environment variable access
+- Check webhook delivery status and error handling
+- Test prompt formatting with `format_ci_failure_alert()` and `format_ci_success_summary()`
+
 ### Configuration Management
 
 #### Team Configuration (`team_config.json`)
@@ -317,4 +355,16 @@ starter/
 - State tracking prevents duplicate processing
 - Configurable retention and cleanup policies
 
-This MCP server provides a complete solution for intelligent PR analysis and event-driven GitHub Actions automation with comprehensive incident response capabilities, leveraging Claude's AI capabilities for enhanced development workflows and team coordination.
+#### Slack Configuration (`.env`)
+```bash
+# Slack webhook URL for team notifications
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK
+```
+
+**Security Best Practices:**
+- Never commit `.env` files to version control
+- Use environment-specific webhook URLs
+- Rotate webhook URLs periodically
+- Monitor delivery failures and webhook health
+
+This MCP server provides a complete solution for intelligent PR analysis and event-driven GitHub Actions automation with comprehensive incident response capabilities and real-time Slack notifications, leveraging Claude's AI capabilities for enhanced development workflows and seamless team coordination.

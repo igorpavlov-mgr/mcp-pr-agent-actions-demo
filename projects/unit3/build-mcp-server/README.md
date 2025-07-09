@@ -1,6 +1,6 @@
 # PR Agent MCP Server
 
-A comprehensive MCP server that combines PR template analysis with GitHub Actions webhook integration for event-driven automation, CI/CD monitoring, and intelligent incident response.
+A comprehensive MCP server that combines PR template analysis with GitHub Actions webhook integration for event-driven automation, CI/CD monitoring, intelligent incident response, and Slack notifications for complete team communication workflows.
 
 ## Overview
 
@@ -12,6 +12,7 @@ This project evolved from a basic PR template suggestion tool into a full-featur
 - **Intelligent Template Selection**: AI-powered template recommendations based on code changes
 - **Incident Response System**: Event tracking, failure detection, and team notification automation
 - **Team Management**: Repository ownership mapping and expertise-based routing
+- **Slack Integration**: Real-time notifications for CI/CD events with rich formatting and team communication
 
 ## Architecture
 
@@ -23,6 +24,7 @@ This project evolved from a basic PR template suggestion tool into a full-featur
 4. **Template System**: Extensible PR template framework with security support
 5. **Event Processing**: Repository-grouped workflow status with time tracking
 6. **Incident Management**: Event state tracking and team notification system
+7. **Slack Integration**: Real-time messaging with secure webhook delivery and rich formatting
 
 ### Event-Driven Patterns
 
@@ -45,7 +47,7 @@ Follow the official installation instructions at: https://docs.astral.sh/uv/gett
 ### 2. Install dependencies
 
 ```bash
-# Install all dependencies including webhook support
+# Install all dependencies including webhook support and Slack integration
 uv sync
 
 # Install with dev dependencies for testing
@@ -64,7 +66,16 @@ claude mcp add pr-agent -- uv --directory /absolute/path/to/starter run server.p
 claude mcp list
 ```
 
-### 4. Set up team configuration (optional)
+### 4. Configure Slack Integration (optional)
+
+Create a `.env` file for Slack webhook configuration:
+
+```bash
+# .env file
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK
+```
+
+### 5. Set up team configuration (optional)
 
 Edit `team_config.json` to customize repository ownership and team routing:
 
@@ -133,6 +144,13 @@ Edit `team_config.json` to customize repository ownership and team routing:
    - Returns: Confirmation of marked events
    - Features: Prevents duplicate notifications and processing
 
+### Slack Integration Tools
+
+10. **send_slack_notification** - Send formatted notifications to team Slack channel
+    - Parameters: `message` (Slack-formatted message)
+    - Returns: Delivery confirmation or error details
+    - Features: Secure webhook delivery, timeout protection, rich formatting support
+
 ## MCP Prompts
 
 ### Automation Prompts
@@ -161,6 +179,18 @@ Edit `team_config.json` to customize repository ownership and team routing:
    - Orchestrates unseen event detection, failure analysis, and team notifications
    - Generates actionable incident response dashboard
    - Provides structured workflow for handling CI/CD failures
+
+### Slack Communication Prompts
+
+7. **format_ci_failure_alert** - Create Slack alerts for CI/CD failures
+   - Provides template for formatting failure notifications
+   - Includes proper Slack markdown syntax and link formatting
+   - Designed for immediate team notification of critical issues
+
+8. **format_ci_success_summary** - Create Slack messages for successful deployments
+   - Templates for celebrating successful deployments
+   - Includes deployment details and change summaries
+   - Optimized for team communication and status updates
 
 ## Template System
 
@@ -215,6 +245,22 @@ The server uses intelligent type mapping:
 
 # Generate comprehensive incident dashboard
 "Use the incident_response_dashboard prompt to create a complete incident response report"
+```
+
+### Slack Notifications
+
+```bash
+# Send a notification to Slack
+"Send a message to the team: 'Deployment completed successfully!'"
+
+# Check recent CI events and notify about successes
+"Check recent CI events and notify the team about any successful deployments using our Slack tool"
+
+# Format a failure alert for Slack
+"Use the format_ci_failure_alert prompt to create a properly formatted Slack message for the CI failure"
+
+# Send formatted deployment success summary
+"Use format_ci_success_summary to create a celebration message and send it via Slack"
 ```
 
 ### Event Management
@@ -371,6 +417,8 @@ The server will:
 
 - `mcp[cli]>=1.0.0` - FastMCP framework
 - `aiohttp>=3.10.0,<4.0.0` - HTTP client for webhook handling
+- `requests>=2.31.0` - HTTP client for Slack webhook notifications
+- `python-dotenv>=1.0.0` - Environment variable management for Slack configuration
 - `pytest>=8.3.0` - Testing framework
 - `pytest-asyncio>=0.21.0` - Async testing support
 
@@ -380,6 +428,7 @@ The server will:
 starter/
 ├── server.py              # Main MCP server implementation
 ├── pyproject.toml         # Project dependencies and metadata
+├── .env                   # Environment variables (Slack webhook URL)
 ├── github_events.json     # Webhook events storage
 ├── events_state.json      # Event processing state tracking
 ├── team_config.json       # Team member and expertise mapping
@@ -424,4 +473,38 @@ jobs:
           uv run server.py
 ```
 
-This MCP server provides a complete solution for intelligent PR analysis and event-driven GitHub Actions automation with comprehensive incident response capabilities, leveraging Claude's AI capabilities for enhanced development workflows and team coordination.
+## Slack Integration Features
+
+### Secure Webhook Delivery
+- Environment variable-based configuration via `.env` file
+- 10-second timeout protection for reliable delivery
+- Comprehensive error handling with detailed feedback
+- Support for rich Slack markdown formatting
+
+### Formatted Messages
+- **CI Failure Alerts**: Immediate notifications with proper Slack link formatting
+- **Deployment Success**: Celebration messages with deployment details
+- **Custom Messages**: Send any formatted message to the team channel
+- **Rich Formatting**: Full support for Slack markdown including emojis, links, and formatting
+
+### Usage Examples
+```bash
+# Basic notification
+"Send a Slack notification: 'Build completed successfully!'"
+
+# CI/CD Integration
+"Check recent CI events and notify the team about any successful deployments"
+
+# Formatted alerts
+"Format a CI failure alert for Slack and send it to the team"
+```
+
+### Configuration
+Create a `.env` file with your Slack webhook URL:
+```bash
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK
+```
+
+The server automatically loads environment variables using `python-dotenv` for secure configuration management.
+
+This MCP server provides a complete solution for intelligent PR analysis and event-driven GitHub Actions automation with comprehensive incident response capabilities and real-time Slack notifications, leveraging Claude's AI capabilities for enhanced development workflows and seamless team coordination.
